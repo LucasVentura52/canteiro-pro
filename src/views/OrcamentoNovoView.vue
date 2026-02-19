@@ -8,31 +8,11 @@
         rounded
       />
 
-      <v-alert
-        v-if="error"
-        class="soft-alert alert-error"
-        type="error"
-        variant="tonal"
-      >
-        {{ error }}
-      </v-alert>
-
-      <v-alert
-        v-if="success"
-        class="soft-alert alert-success"
-        type="success"
-        variant="tonal"
-      >
-        {{ success }}
-      </v-alert>
-
-      <v-alert
+      <div
         v-if="draftInfo"
-        class="soft-alert"
-        type="info"
-        variant="tonal"
+        class="inline-feedback inline-feedback--info"
       >
-        {{ draftInfo }}
+        <p>{{ draftInfo }}</p>
         <div class="mt-2">
           <v-btn
             size="small"
@@ -44,24 +24,13 @@
             Limpar rascunho local
           </v-btn>
         </div>
-      </v-alert>
+      </div>
 
-      <v-alert
-        v-if="warning"
-        class="soft-alert alert-warning"
-        type="warning"
-        variant="tonal"
-      >
-        {{ warning }}
-      </v-alert>
-
-      <v-alert
+      <div
         v-if="!hasClientes || !hasServicos"
-        class="soft-alert alert-warning"
-        type="warning"
-        variant="tonal"
+        class="inline-feedback inline-feedback--warning"
       >
-        Para criar um orçamento, cadastre pelo menos 1 cliente e 1 serviço.
+        <p>Para criar um orçamento, cadastre pelo menos 1 cliente e 1 serviço.</p>
         <div class="mt-2 d-flex ga-2">
           <v-btn size="small" variant="outlined" color="secondary" @click="$router.push({ name: 'Clientes' })">
             Ir para Clientes
@@ -70,7 +39,7 @@
             Ir para Serviços
           </v-btn>
         </div>
-      </v-alert>
+      </div>
 
       <v-card class="pa-4 section-card">
         <div class="section-head">
@@ -194,6 +163,7 @@
 import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import MainLayout from '@/layouts/MainLayout.vue';
 import { apiClient } from '@/services/apiClient';
+import { useFeedbackToasts } from '@/composables/useFeedbackToasts';
 import { formatCurrency, getTodayIso } from '@/utils/formatters';
 import { getFriendlyError } from '@/utils/errorMessages';
 import { clearOrcamentoDraft, loadOrcamentoDraft, saveOrcamentoDraft } from '@/services/orcamentoDraft';
@@ -219,6 +189,7 @@ const error = ref('');
 const success = ref('');
 const draftInfo = ref('');
 const warning = ref('');
+useFeedbackToasts({ error, success, warning });
 const hasBootstrapped = ref(false);
 let rowCounter = 0;
 let draftSaveTimer = 0;

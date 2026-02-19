@@ -9,33 +9,6 @@
           </div>
         </div>
 
-        <v-alert
-          v-if="error"
-          class="mb-3 soft-alert alert-error"
-          type="error"
-          variant="tonal"
-        >
-          {{ error }}
-        </v-alert>
-
-        <v-alert
-          v-if="success"
-          class="mb-3 soft-alert alert-success"
-          type="success"
-          variant="tonal"
-        >
-          {{ success }}
-        </v-alert>
-
-        <v-alert
-          v-if="warning"
-          class="mb-3 soft-alert alert-warning"
-          type="warning"
-          variant="tonal"
-        >
-          {{ warning }}
-        </v-alert>
-
         <v-row>
           <v-col cols="12">
             <v-text-field
@@ -213,6 +186,7 @@
 import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue';
 import MainLayout from '@/layouts/MainLayout.vue';
 import { apiClient } from '@/services/apiClient';
+import { useFeedbackToasts } from '@/composables/useFeedbackToasts';
 import { getFriendlyError } from '@/utils/errorMessages';
 import { maskPhone } from '@/utils/inputMasks';
 
@@ -223,6 +197,7 @@ const saving = ref(false);
 const error = ref('');
 const success = ref('');
 const warning = ref('');
+useFeedbackToasts({ error, success, warning });
 const hasLoaded = ref(false);
 const editDialog = ref(false);
 const editing = ref(false);

@@ -27,9 +27,6 @@
         </v-row>
       </v-card>
 
-      <v-alert v-if="error" class="soft-alert alert-error" type="error" variant="tonal">{{ error }}</v-alert>
-      <v-alert v-if="warning" class="soft-alert alert-warning" type="warning" variant="tonal">{{ warning }}</v-alert>
-
       <v-progress-linear
         v-if="loading"
         color="primary"
@@ -163,6 +160,7 @@
 import { onActivated, onMounted, reactive, ref } from 'vue';
 import MainLayout from '@/layouts/MainLayout.vue';
 import { apiClient } from '@/services/apiClient';
+import { useFeedbackToasts } from '@/composables/useFeedbackToasts';
 import { formatCurrency, getCurrentMonth } from '@/utils/formatters';
 import { getFriendlyError } from '@/utils/errorMessages';
 
@@ -170,6 +168,7 @@ const month = ref(getCurrentMonth());
 const loading = ref(false);
 const error = ref('');
 const warning = ref('');
+useFeedbackToasts({ error, warning });
 const hasLoaded = ref(false);
 
 const report = reactive({

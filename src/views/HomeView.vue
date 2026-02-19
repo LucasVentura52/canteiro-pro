@@ -1,24 +1,6 @@
 <template>
   <MainLayout title="Painel da Obra">
     <div class="page-stack">
-      <v-alert
-        v-if="error"
-        class="soft-alert alert-warning"
-        type="warning"
-        variant="tonal"
-      >
-        {{ error }}
-      </v-alert>
-
-      <v-alert
-        v-if="warning"
-        class="soft-alert alert-warning"
-        type="warning"
-        variant="tonal"
-      >
-        {{ warning }}
-      </v-alert>
-
       <v-row>
         <v-col cols="12" sm="6">
           <v-card class="pa-4 metric-card section-card">
@@ -143,11 +125,13 @@
 import { computed, onActivated, onMounted, reactive, ref } from 'vue';
 import MainLayout from '@/layouts/MainLayout.vue';
 import { apiClient } from '@/services/apiClient';
+import { useFeedbackToasts } from '@/composables/useFeedbackToasts';
 import { formatCurrency } from '@/utils/formatters';
 import { getFriendlyError } from '@/utils/errorMessages';
 
 const error = ref('');
 const warning = ref('');
+useFeedbackToasts({ error, warning });
 const hasLoaded = ref(false);
 const report = reactive({
   resumo: {

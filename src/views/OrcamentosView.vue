@@ -35,10 +35,6 @@
         </v-btn>
       </v-card>
 
-      <v-alert v-if="error" class="soft-alert alert-error" type="error" variant="tonal">{{ error }}</v-alert>
-      <v-alert v-if="success" class="soft-alert alert-success" type="success" variant="tonal">{{ success }}</v-alert>
-      <v-alert v-if="warning" class="soft-alert alert-warning" type="warning" variant="tonal">{{ warning }}</v-alert>
-
       <v-progress-linear
         v-if="loading"
         color="primary"
@@ -167,14 +163,9 @@
             <p class="text-h6 font-weight-bold">{{ formatCurrency(detailData.total) }}</p>
           </div>
 
-          <v-alert
-            v-if="detailData.observacao"
-            class="soft-alert mb-3"
-            type="info"
-            variant="tonal"
-          >
-            {{ detailData.observacao }}
-          </v-alert>
+          <div v-if="detailData.observacao" class="inline-feedback inline-feedback--info mb-3">
+            <p>{{ detailData.observacao }}</p>
+          </div>
 
           <v-row class="mb-2">
             <v-col cols="12" sm="4">
@@ -357,6 +348,7 @@ import { onActivated, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import MainLayout from '@/layouts/MainLayout.vue';
 import { apiClient } from '@/services/apiClient';
+import { useFeedbackToasts } from '@/composables/useFeedbackToasts';
 import { formatCurrency, formatDate, getCurrentMonth, getTodayIso } from '@/utils/formatters';
 import { getFriendlyError } from '@/utils/errorMessages';
 import { buildOrcamentoWhatsappMessage } from '@/utils/orcamentoShare';
@@ -370,6 +362,7 @@ const loading = ref(false);
 const error = ref('');
 const success = ref('');
 const warning = ref('');
+useFeedbackToasts({ error, success, warning });
 const updatingId = ref('');
 const hasLoaded = ref(false);
 const detailDialog = ref(false);

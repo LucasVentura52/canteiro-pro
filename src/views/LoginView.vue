@@ -7,10 +7,6 @@
           <h1 class="text-h5 font-weight-bold mb-2">Entrar na conta</h1>
           <p class="section-subtitle mb-4">Plataforma profissional para orçamentos e gestão de obras.</p>
 
-          <v-alert v-if="error" class="mb-4 soft-alert alert-error" type="error" variant="tonal" density="comfortable">
-            {{ error }}
-          </v-alert>
-
           <v-text-field v-model="form.usuario" label="Usuário" prepend-inner-icon="mdi-account-outline"
             autocomplete="username" hint="Informe seu usuário de acesso" persistent-hint />
 
@@ -34,12 +30,14 @@
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { apiClient } from '@/services/apiClient';
+import { useFeedbackToasts } from '@/composables/useFeedbackToasts';
 import { getFriendlyError } from '@/utils/errorMessages';
 
 const router = useRouter();
 const loading = ref(false);
 const showPassword = ref(false);
 const error = ref('');
+useFeedbackToasts({ error });
 
 const form = reactive({
   usuario: '',
