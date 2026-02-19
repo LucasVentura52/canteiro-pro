@@ -52,6 +52,12 @@ const SHEET_HEADERS = {
 const STATUS_VALIDOS = ['rascunho', 'aprovado', 'recusado'];
 const TOKEN_PREFIX = 'tok_';
 const TOKEN_TTL_SECONDS = 60 * 60 * 12; // 12h
+const SCHEMA_CACHE_KEY = 'canteiro_pro_schema_ok_v1';
+const SCHEMA_CACHE_TTL_SECONDS = 60 * 10; // 10 min
+
+let REQUEST_CACHE = {
+  sheets: {}
+};
 
 function doGet(e) {
   return respond_(dispatch_('GET', e));
@@ -63,6 +69,8 @@ function doPost(e) {
 
 function dispatch_(method, e) {
   try {
+    beginRequestCache_();
+
     const body = method === 'POST' ? parseBody_(e) : {};
     const route = getRoute_(e, body);
 
@@ -262,6 +270,20 @@ function normalizeCell_(value) {
   return value;
 }
 
+function beginRequestCache_() {
+  REQUEST_CACHE = {
+    sheets: {}
+  };
+}
+
+function cloneRow_(row) {
+  return Object.assign({}, row || {});
+}
+
+function cloneRows_(rows) {
+  return (rows || []).map((row) => cloneRow_(row));
+}
+
 function getSpreadsheet_() {
   return SpreadsheetApp.getActiveSpreadsheet();
 }
@@ -292,15 +314,28 @@ function ensureSheetHeaders_(sheet, requiredHeaders) {
 }
 
 function ensureRequiredSchema_() {
-  const ss = getSpreadsheet_();
+  const cache = CacheService.getScriptCache();
+  const cachedSchemaOk = cache.get(SCHEMA_CACHE_KEY);
 
-  Object.keys(SHEET_HEADERS).forEach((sheetName) => {
-    let sheet = ss.getSheetByName(sheetName);
-    if (!sheet) {
-      sheet = ss.insertSheet(sheetName);
-    }
+  if (cachedSchemaOk === '1') {
+    return;
+  }
 
-    ensureSheetHeaders_(sheet, SHEET_HEADERS[sheetName]);
+  withSheetLock_(function () {
+    if (cache.get(SCHEMA_CACHE_KEY) === '1') return;
+
+    const ss = getSpreadsheet_();
+
+    Object.keys(SHEET_HEADERS).forEach((sheetName) => {
+      let sheet = ss.getSheetByName(sheetName);
+      if (!sheet) {
+        sheet = ss.insertSheet(sheetName);
+      }
+
+      ensureSheetHeaders_(sheet, SHEET_HEADERS[sheetName]);
+    });
+
+    cache.put(SCHEMA_CACHE_KEY, '1', SCHEMA_CACHE_TTL_SECONDS);
   });
 }
 
@@ -323,22 +358,44 @@ function withSheetLock_(callback) {
   }
 }
 
-function readAll_(sheetName) {
+function invalidateSheetCache_(sheetName) {
+  if (REQUEST_CACHE && REQUEST_CACHE.sheets && REQUEST_CACHE.sheets[sheetName]) {
+    delete REQUEST_CACHE.sheets[sheetName];
+  }
+}
+
+function loadSheetCache_(sheetName) {
+  if (REQUEST_CACHE && REQUEST_CACHE.sheets && REQUEST_CACHE.sheets[sheetName]) {
+    return REQUEST_CACHE.sheets[sheetName];
+  }
+
   const sheet = getSheet_(sheetName);
   const headers = getHeaders_(sheet);
   const lastRow = sheet.getLastRow();
+  let rows = [];
 
-  if (lastRow <= 1) return [];
-
-  const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-
-  return values.map((row) => {
-    const item = {};
-    headers.forEach((header, idx) => {
-      item[header] = normalizeCell_(row[idx]);
+  if (lastRow > 1) {
+    const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    rows = values.map((row) => {
+      const item = {};
+      headers.forEach((header, idx) => {
+        item[header] = normalizeCell_(row[idx]);
+      });
+      return item;
     });
-    return item;
-  });
+  }
+
+  const cached = {
+    headers: headers,
+    rows: rows
+  };
+
+  REQUEST_CACHE.sheets[sheetName] = cached;
+  return cached;
+}
+
+function readAll_(sheetName) {
+  return cloneRows_(loadSheetCache_(sheetName).rows);
 }
 
 function appendObject_(sheetName, payload) {
@@ -346,7 +403,24 @@ function appendObject_(sheetName, payload) {
     const sheet = getSheet_(sheetName);
     const headers = getHeaders_(sheet);
     const row = headers.map((header) => (payload[header] !== undefined ? payload[header] : ''));
-    sheet.appendRow(row);
+    const nextRow = sheet.getLastRow() + 1;
+    sheet.getRange(nextRow, 1, 1, headers.length).setValues([row]);
+    invalidateSheetCache_(sheetName);
+  });
+}
+
+function appendObjects_(sheetName, payloads) {
+  const items = Array.isArray(payloads) ? payloads : [];
+  if (!items.length) return;
+
+  return withSheetLock_(function () {
+    const sheet = getSheet_(sheetName);
+    const headers = getHeaders_(sheet);
+    const startRow = sheet.getLastRow() + 1;
+    const rows = items.map((payload) => headers.map((header) => (payload && payload[header] !== undefined ? payload[header] : '')));
+
+    sheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+    invalidateSheetCache_(sheetName);
   });
 }
 
@@ -361,27 +435,45 @@ function updateById_(sheetName, id, patch) {
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return false;
 
-    const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+    const idRange = sheet.getRange(2, idIndex + 1, lastRow - 1, 1);
+    const finder = idRange.createTextFinder(String(id)).matchEntireCell(true);
+    const cell = finder.findNext();
 
-    for (let rowIdx = 0; rowIdx < values.length; rowIdx += 1) {
-      if (String(values[rowIdx][idIndex]) === String(id)) {
-        headers.forEach((header, colIdx) => {
-          if (patch[header] !== undefined) {
-            values[rowIdx][colIdx] = patch[header];
-          }
-        });
-
-        sheet.getRange(2, 1, values.length, headers.length).setValues(values);
-        return true;
-      }
+    if (!cell) {
+      return false;
     }
 
-    return false;
+    const rowNumber = cell.getRow();
+    const rowRange = sheet.getRange(rowNumber, 1, 1, headers.length);
+    const rowValues = rowRange.getValues()[0];
+    let changed = false;
+
+    headers.forEach((header, colIdx) => {
+      if (patch[header] !== undefined && rowValues[colIdx] !== patch[header]) {
+        rowValues[colIdx] = patch[header];
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      rowRange.setValues([rowValues]);
+    }
+
+    invalidateSheetCache_(sheetName);
+    return true;
   });
 }
 
 function findOne_(sheetName, field, value) {
-  return readAll_(sheetName).find((row) => String(row[field]) === String(value)) || null;
+  const rows = loadSheetCache_(sheetName).rows;
+
+  for (let index = 0; index < rows.length; index += 1) {
+    if (String(rows[index][field]) === String(value)) {
+      return cloneRow_(rows[index]);
+    }
+  }
+
+  return null;
 }
 
 function isTruthy_(value) {
@@ -785,10 +877,9 @@ function normalizeDateOnly_(value) {
 }
 
 function listOrcamentos_(mes, status) {
-  let rows = readAll_(SHEETS.orcamentos).map((item) => {
-    item.data = normalizeDateOnly_(item.data);
-    return item;
-  });
+  let rows = readAll_(SHEETS.orcamentos).map((item) => Object.assign({}, item, {
+    data: normalizeDateOnly_(item.data)
+  }));
 
   if (mes) {
     rows = rows.filter((item) => String(item.data || '').slice(0, 7) === mes);
@@ -798,8 +889,9 @@ function listOrcamentos_(mes, status) {
     rows = rows.filter((item) => String(item.status || '') === status);
   }
 
-  const orcamentoIds = rows.map((item) => String(item.id));
-  const resumoFinanceiro = buildRecebimentosResumoMap_(orcamentoIds);
+  const orcamentoIds = rows.map((item) => String(item.id || ''));
+  const recebimentos = readAll_(SHEETS.recebimentos);
+  const resumoFinanceiro = buildRecebimentosResumoMap_(orcamentoIds, rows, recebimentos);
 
   rows = rows.map((item) => {
     const total = toNumber_(item.total);
@@ -826,14 +918,14 @@ function computePagamentoStatus_(total, totalRecebido) {
   return 'pago';
 }
 
-function buildRecebimentosResumoMap_(orcamentoIds) {
+function buildRecebimentosResumoMap_(orcamentoIds, orcamentosSource, recebimentosSource) {
   const ids = Array.isArray(orcamentoIds) ? orcamentoIds : [];
   const idSet = {};
   ids.forEach((id) => {
     idSet[String(id)] = true;
   });
 
-  const orcamentos = readAll_(SHEETS.orcamentos);
+  const orcamentos = Array.isArray(orcamentosSource) ? orcamentosSource : readAll_(SHEETS.orcamentos);
   const totalMap = {};
 
   orcamentos.forEach((orcamento) => {
@@ -843,7 +935,7 @@ function buildRecebimentosResumoMap_(orcamentoIds) {
     totalMap[key] = toNumber_(orcamento.total);
   });
 
-  const recebimentos = readAll_(SHEETS.recebimentos)
+  const recebimentos = (Array.isArray(recebimentosSource) ? recebimentosSource : readAll_(SHEETS.recebimentos))
     .filter((item) => isActive_(item.ativo))
     .filter((item) => {
       const key = String(item.orcamento_id || '');
@@ -880,12 +972,12 @@ function buildRecebimentosResumoMap_(orcamentoIds) {
   return result;
 }
 
-function listRecebimentos_(orcamentoId, includeInativos) {
-  let rows = readAll_(SHEETS.recebimentos).map((item) => {
-    item.data = normalizeDateOnly_(item.data);
-    item.valor = Number(toNumber_(item.valor).toFixed(2));
-    return item;
-  });
+function listRecebimentos_(orcamentoId, includeInativos, sourceRows) {
+  let rows = (Array.isArray(sourceRows) ? sourceRows : readAll_(SHEETS.recebimentos))
+    .map((item) => Object.assign({}, item, {
+      data: normalizeDateOnly_(item.data),
+      valor: Number(toNumber_(item.valor).toFixed(2))
+    }));
 
   if (!includeInativos) {
     rows = rows.filter((item) => isActive_(item.ativo));
@@ -1013,8 +1105,9 @@ function getOrcamentoDetalhe_(id) {
       };
     });
 
-  const recebimentos = listRecebimentos_(id, true);
-  const financeiroMap = buildRecebimentosResumoMap_([id]);
+  const recebimentosSource = readAll_(SHEETS.recebimentos);
+  const recebimentos = listRecebimentos_(id, true, recebimentosSource);
+  const financeiroMap = buildRecebimentosResumoMap_([id], [orcamento], recebimentosSource);
 
   return Object.assign({}, orcamento, {
     cliente: cliente
@@ -1065,6 +1158,10 @@ function handleOrcamentosCreate_(body) {
   }
 
   const servicos = readAll_(SHEETS.servicos);
+  const servicosMap = {};
+  servicos.forEach((servico) => {
+    servicosMap[String(servico.id)] = servico;
+  });
 
   const normalizados = itens
     .map((item) => {
@@ -1076,7 +1173,7 @@ function handleOrcamentosCreate_(body) {
         return null;
       }
 
-      const servico = servicos.find((s) => String(s.id) === servicoId);
+      const servico = servicosMap[servicoId];
       if (!servico) {
         return null;
       }
@@ -1120,8 +1217,8 @@ function handleOrcamentosCreate_(body) {
 
   normalizados.forEach((item) => {
     item.orcamento_id = orcamentoId;
-    appendObject_(SHEETS.orcamento_itens, item);
   });
+  appendObjects_(SHEETS.orcamento_itens, normalizados);
 
   return ok_({ data: orcamento });
 }
@@ -1198,7 +1295,8 @@ function buildRelatorioMensal_(ano, mes) {
   orcamentos.forEach((orc) => {
     orcamentoIds[String(orc.id)] = true;
   });
-  const resumoFinanceiro = buildRecebimentosResumoMap_(Object.keys(orcamentoIds));
+  const recebimentos = readAll_(SHEETS.recebimentos);
+  const resumoFinanceiro = buildRecebimentosResumoMap_(Object.keys(orcamentoIds), orcamentos, recebimentos);
 
   resumo.total_recebido = Number(Object.keys(resumoFinanceiro)
     .reduce((acc, key) => acc + toNumber_(resumoFinanceiro[key].total_recebido), 0)
